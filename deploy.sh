@@ -36,8 +36,8 @@ forge clean
 
 # Determine which contract to deploy
 if [ "$CONTRACT_TYPE" = "token" ]; then
-    SCRIPT="script/Token.s.sol:DeployToken"
-    CONTRACT_NAME="Token"
+    SCRIPT="script/SimpleToken.s.sol:DeploySimpleToken"
+    CONTRACT_NAME="SimpleToken"
 else
     echo "Invalid contract type. Use 'token'"
     exit 1
