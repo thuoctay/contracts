@@ -2,9 +2,11 @@
 pragma solidity 0.8.29;
 
 import { Test } from "forge-std/Test.sol";
-import { BatchMerkleRegistryUpgradeable } from "@src/BatchMerkleRegistryUpgradeable.sol";
 import { Upgrades } from "openzeppelin-foundry-upgrades/Upgrades.sol";
 import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
+
+import { IBatchMerkleRegistry } from "@src/interfaces/IBatchMerkleRegistry.sol";
+import { BatchMerkleRegistryUpgradeable } from "@src/BatchMerkleRegistryUpgradeable.sol";
 
 contract BatchMerkleRegistryTest is Test {
     BatchMerkleRegistryUpgradeable public registry;
@@ -12,7 +14,6 @@ contract BatchMerkleRegistryTest is Test {
     address public user;
     address public unauthorized;
 
-    // Test data
     string public constant BATCH_ID = "BATCH_001";
     string public constant VERSION = "2025-06-23";
     bytes32 public constant MERKLE_ROOT = 0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef;
@@ -45,7 +46,7 @@ contract BatchMerkleRegistryTest is Test {
     function test_SubmitBatchRootEmitsEvent() public {
         vm.startPrank(owner);
         vm.expectEmit(true, true, true, true);
-        emit BatchMerkleRegistryUpgradeable.MerkleRootSubmitted(BATCH_ID, VERSION, MERKLE_ROOT);
+        emit IBatchMerkleRegistry.MerkleRootSubmitted(BATCH_ID, VERSION, MERKLE_ROOT);
         registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
         vm.stopPrank();
     }
@@ -62,17 +63,8 @@ contract BatchMerkleRegistryTest is Test {
     }
 
     function test_VerifyLeafWithValidProof() public {
-        // Setup: Submit a Merkle root
-        vm.startPrank(owner);
-        registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
-        vm.stopPrank();
-
-        // Create a simple Merkle tree for testing
         bytes32 leaf = keccak256(abi.encodePacked("test_data"));
-        bytes32[] memory proof = new bytes32[](0); // Empty proof for root == leaf case
-
-        // For this test, we'll use a simple case where the leaf is the root
-        // In a real scenario, you'd generate proper Merkle proofs
+        bytes32[] memory proof = new bytes32[](0); // An empty proof is valid when the leaf is the root
         bytes32 testRoot = leaf;
 
         vm.startPrank(owner);
@@ -80,16 +72,14 @@ contract BatchMerkleRegistryTest is Test {
         vm.stopPrank();
 
         bool isValid = registry.verifyLeaf(BATCH_ID, VERSION, leaf, proof);
-        assertTrue(isValid);
+        assertTrue(isValid, "Leaf verification should be valid when leaf is the root");
     }
 
     function test_VerifyLeafWithInvalidProof() public {
-        // Setup: Submit a Merkle root
         vm.startPrank(owner);
         registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
         vm.stopPrank();
 
-        // Create invalid proof
         bytes32 leaf = keccak256(abi.encodePacked("test_data"));
         bytes32[] memory invalidProof = new bytes32[](1);
         invalidProof[0] = bytes32(0x1111111111111111111111111111111111111111111111111111111111111111);
@@ -103,30 +93,27 @@ contract BatchMerkleRegistryTest is Test {
         bytes32[] memory proof = new bytes32[](0);
 
         vm.expectRevert(
-            abi.encodeWithSelector(
-                BatchMerkleRegistryUpgradeable.BatchVersionNotFound.selector, "NON_EXISTENT", VERSION
-            )
+            abi.encodeWithSelector(IBatchMerkleRegistry.BatchVersionNotFound.selector, "NON_EXISTENT", VERSION)
         );
         registry.verifyLeaf("NON_EXISTENT", VERSION, leaf, proof);
     }
 
-    function test_UpdateBatchRoot() public {
-        // Submit initial root
+    function test_RevertOnUpdatingBatchRoot() public {
         vm.startPrank(owner);
         registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
         assertEq(registry.getRoot(BATCH_ID, VERSION), MERKLE_ROOT);
 
-        // Update with new root
         bytes32 newRoot = 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890;
+        vm.expectRevert(
+            abi.encodeWithSelector(IBatchMerkleRegistry.BatchVersionAlreadyExists.selector, BATCH_ID, VERSION)
+        );
         registry.submitBatchRoot(BATCH_ID, VERSION, newRoot);
-        assertEq(registry.getRoot(BATCH_ID, VERSION), newRoot);
         vm.stopPrank();
     }
 
     function test_MultipleBatchVersions() public {
         vm.startPrank(owner);
 
-        // Submit multiple versions for the same batch
         registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
         registry.submitBatchRoot(
             BATCH_ID, "2025-06-24", 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
@@ -137,7 +124,6 @@ contract BatchMerkleRegistryTest is Test {
 
         vm.stopPrank();
 
-        // Verify all versions are stored correctly
         assertEq(registry.getRoot(BATCH_ID, VERSION), MERKLE_ROOT);
         assertEq(
             registry.getRoot(BATCH_ID, "2025-06-24"), 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
@@ -150,7 +136,6 @@ contract BatchMerkleRegistryTest is Test {
     function test_MultipleBatches() public {
         vm.startPrank(owner);
 
-        // Submit roots for different batches
         registry.submitBatchRoot(BATCH_ID, VERSION, MERKLE_ROOT);
         registry.submitBatchRoot(
             "BATCH_002", VERSION, 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
@@ -161,7 +146,6 @@ contract BatchMerkleRegistryTest is Test {
 
         vm.stopPrank();
 
-        // Verify all batches are stored correctly
         assertEq(registry.getRoot(BATCH_ID, VERSION), MERKLE_ROOT);
         assertEq(
             registry.getRoot("BATCH_002", VERSION), 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890

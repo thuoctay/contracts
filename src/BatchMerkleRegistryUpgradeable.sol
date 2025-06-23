@@ -6,12 +6,11 @@ import { OwnableUpgradeable } from "@openzeppelin/contracts-upgradeable/access/O
 import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import { MerkleProof } from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
-contract BatchMerkleRegistryUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgradeable {
-    error BatchVersionNotFound(string batchId, string version);
+import { IBatchMerkleRegistry } from "@src/interfaces/IBatchMerkleRegistry.sol";
 
-    mapping(string batchId => mapping(string version => bytes32 root)) public batchRoots;
-
-    event MerkleRootSubmitted(string batchId, string version, bytes32 root);
+contract BatchMerkleRegistryUpgradeable is Initializable, OwnableUpgradeable, UUPSUpgradeable, IBatchMerkleRegistry {
+    mapping(string batchId => mapping(string version => bytes32 root)) public override batchRoots;
+    // Do we need reverse mapping for batchId?
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -23,19 +22,35 @@ contract BatchMerkleRegistryUpgradeable is Initializable, OwnableUpgradeable, UU
         __UUPSUpgradeable_init();
     }
 
-    function submitBatchRoot(string calldata batchId, string calldata version, bytes32 root) external onlyOwner {
-        batchRoots[batchId][version] = root;
-        emit MerkleRootSubmitted(batchId, version, root);
+    function submitBatchRoot(
+        string calldata batchId,
+        string calldata version,
+        bytes32 root
+    )
+        external
+        override
+        onlyOwner
+    {
+        _submitBatchRoot(batchId, version, root);
+    }
+
+    function submitMultipleBatchRoots(BatchSubmission[] calldata submissions) external override onlyOwner {
+        uint256 len = submissions.length;
+        for (uint256 i = 0; i < len; ++i) {
+            BatchSubmission calldata submission = submissions[i];
+            _submitBatchRoot(submission.batchId, submission.version, submission.root);
+        }
     }
 
     function verifyLeaf(
-        string memory batchId,
-        string memory version,
+        string calldata batchId,
+        string calldata version,
         bytes32 leaf,
         bytes32[] calldata proof
     )
         external
         view
+        override
         returns (bool)
     {
         bytes32 root = batchRoots[batchId][version];
@@ -46,8 +61,16 @@ contract BatchMerkleRegistryUpgradeable is Initializable, OwnableUpgradeable, UU
         return MerkleProof.verify(proof, root, leaf);
     }
 
-    function getRoot(string memory batchId, string memory version) external view returns (bytes32) {
+    function getRoot(string calldata batchId, string calldata version) external view override returns (bytes32) {
         return batchRoots[batchId][version];
+    }
+
+    function _submitBatchRoot(string calldata batchId, string calldata version, bytes32 root) internal {
+        if (batchRoots[batchId][version] != bytes32(0)) {
+            revert BatchVersionAlreadyExists(batchId, version);
+        }
+        batchRoots[batchId][version] = root;
+        emit MerkleRootSubmitted(batchId, version, root);
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner { }
